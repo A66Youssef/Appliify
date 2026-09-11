@@ -1,0 +1,973 @@
+openapi: 3.1.0
+info:
+  title: Appliify API
+  version: "1.0"
+  description: >
+    Complete API contract for Appliify V1.0 (deferred pass D1, per SRS §34).
+    Authoritative behavior for each endpoint is specified in SRS §28–§29.
+    Multi-platform (Salla, Zid, WooCommerce; Shopify fast-follow). All
+    tenant-scoped endpoints derive tenant from the token, never from a
+    client-supplied body field. Mutating endpoints accept an Idempotency-Key
+    header. Cross-tenant access returns 404 (not 403) to avoid existence leaks.
+  contact:
+    name: Appliify Architecture Working Group
+servers:
+  - url: https://api.appliify.example/v1
+    description: Production
+  - url: https://staging-api.appliify.example/v1
+    description: Staging
+
+tags:
+  - name: auth
+    description: Merchant dashboard authentication
+  - name: users
+    description: Merchant user management
+  - name: stores
+    description: Store connection & integration
+  - name: catalog
+    description: Product catalog (read)
+  - name: mobile
+    description: Mobile app-instance endpoints (installations, sessions, events, config)
+  - name: identity
+    description: Shopper identity resolution & merge
+  - name: cro
+    description: CRO feature configuration
+  - name: segments
+    description: Behavioral segmentation
+  - name: campaigns
+    description: Push campaigns
+  - name: notifications
+    description: Notification reporting
+  - name: analytics
+    description: Merchant analytics
+  - name: attribution
+    description: Revenue attribution
+  - name: billing
+    description: Plans & subscriptions
+  - name: admin
+    description: Internal administration (global, audited)
+  - name: webhooks
+    description: Inbound platform webhooks
+
+security:
+  - merchantJWT: []
+
+paths:
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Merchant dashboard login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate access token using a refresh token (reuse detection)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200':
+          description: New token pair
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the current token family
+      responses:
+        '204': { description: Logged out }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /users:
+    get:
+      tags: [users]
+      summary: List merchant users (permission users:read)
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Paginated users
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/MerchantUser' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [users]
+      summary: Invite a merchant user (permission users:manage)
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email }
+                role: { type: string, enum: [admin, staff] }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MerchantUser' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /users/{userId}:
+    parameters: [ { $ref: '#/components/parameters/UserId' } ]
+    patch:
+      tags: [users]
+      summary: Update a user's role/status (permission users:manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role: { type: string, enum: [admin, staff] }
+                status: { type: string, enum: [active, disabled] }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MerchantUser' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [users]
+      summary: Remove a user (permission users:manage)
+      responses:
+        '204': { description: Removed }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /stores/connect:
+    post:
+      tags: [stores]
+      summary: Begin connecting a commerce store (permission integrations:connect)
+      description: >
+        Starts the platform connect flow. For OAuth platforms (Salla, Zid)
+        returns an authorization URL; for key-based platforms (WooCommerce,
+        auth model TO VERIFY) accepts credentials. On completion, an
+        integration_connection is created and an initial sync is enqueued.
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [platform]
+              properties:
+                platform: { $ref: '#/components/schemas/PlatformType' }
+                credentials:
+                  type: object
+                  description: Key-based platforms only (e.g. WooCommerce). TO VERIFY per platform.
+                  additionalProperties: true
+      responses:
+        '200':
+          description: OAuth authorization URL (OAuth platforms)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authorization_url: { type: string, format: uri }
+        '201':
+          description: Store connected (key-based platforms)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Store' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /stores/{storeId}/disconnect:
+    parameters: [ { $ref: '#/components/parameters/StoreId' } ]
+    post:
+      tags: [stores]
+      summary: Disconnect a store (permission integrations:disconnect)
+      responses:
+        '202': { description: Disconnect accepted (async cleanup) }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /stores/{storeId}/status:
+    parameters: [ { $ref: '#/components/parameters/StoreId' } ]
+    get:
+      tags: [stores]
+      summary: Store + connection status (permission integrations:read)
+      responses:
+        '200':
+          description: Status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StoreStatus' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /stores/{storeId}/resync:
+    parameters: [ { $ref: '#/components/parameters/StoreId' } ]
+    post:
+      tags: [stores]
+      summary: Trigger a manual resync (permission integrations:read)
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind: { type: string, enum: [catalog, inventory, orders, customers] }
+      responses:
+        '202': { description: Resync enqueued }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /catalog/products:
+    get:
+      tags: [catalog]
+      summary: List products
+      security:
+        - merchantJWT: []
+        - appInstanceToken: []
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: status, in: query, schema: { type: string, enum: [active, archived] } }
+      responses:
+        '200':
+          description: Paginated products
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Product' }
+          headers:
+            ETag: { schema: { type: string } }
+  /catalog/products/{productId}:
+    parameters: [ { $ref: '#/components/parameters/ProductId' } ]
+    get:
+      tags: [catalog]
+      summary: Get a product
+      security:
+        - merchantJWT: []
+        - appInstanceToken: []
+      responses:
+        '200':
+          description: Product
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /installations:
+    post:
+      tags: [mobile]
+      summary: Register an app installation (bootstrap)
+      description: >
+        Called at app bootstrap with a device fingerprint. Upserts a device +
+        installation and creates an anonymous shopper_profile. Returns an
+        app-instance token and the anonymous shopper id. RULE N — device is
+        never equated with shopper.
+      security:
+        - appBootstrap: []
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_slug, fingerprint, platform_os]
+              properties:
+                tenant_slug: { type: string }
+                fingerprint: { type: string }
+                platform_os: { type: string, enum: [ios, android] }
+                model: { type: string }
+                app_version: { type: string }
+      responses:
+        '201':
+          description: Installation registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstallationBootstrap' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /sessions:
+    post:
+      tags: [mobile]
+      summary: Start an app session
+      security: [ { appInstanceToken: [] } ]
+      responses:
+        '201':
+          description: Session started
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+  /events:
+    post:
+      tags: [mobile]
+      summary: Ingest a batch of behavioral events (idempotent on event_id)
+      security: [ { appInstanceToken: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [events]
+              properties:
+                events:
+                  type: array
+                  maxItems: 500
+                  items: { $ref: '#/components/schemas/EventEnvelope' }
+      responses:
+        '202':
+          description: Accepted (per-item accept/reject)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted: { type: integer }
+                  rejected: { type: integer }
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        event_id: { type: string, format: uuid }
+                        status: { type: string, enum: [accepted, duplicate, rejected] }
+                        issue: { type: string }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /identity/login:
+    post:
+      tags: [identity]
+      summary: Resolve/merge anonymous identity into authenticated shopper
+      description: >
+        Called after the shopper authenticates in the store-native WebView flow.
+        Merges the anonymous shopper into the authenticated profile (or promotes
+        it). Enqueues attribution recompute for affected orders (BR-IDENTITY-02).
+      security: [ { appInstanceToken: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [external_customer_id]
+              properties:
+                external_customer_id: { type: string }
+                email: { type: string, format: email }
+                phone: { type: string }
+      responses:
+        '200':
+          description: Session bound to authenticated shopper
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shopper_id: { type: string, format: uuid }
+                  merged: { type: boolean }
+  /mobile/config:
+    get:
+      tags: [mobile]
+      summary: Branding + enabled feature config for the app
+      security: [ { appInstanceToken: [] } ]
+      responses:
+        '200':
+          description: Config
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MobileConfig' }
+          headers:
+            ETag: { schema: { type: string } }
+  /mobile/cro-config:
+    get:
+      tags: [mobile]
+      summary: Validated CRO feature configs for rendering
+      security: [ { appInstanceToken: [] } ]
+      responses:
+        '200':
+          description: CRO configs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CRORenderConfig' }
+          headers:
+            ETag: { schema: { type: string } }
+
+  /cro/features:
+    get:
+      tags: [cro]
+      summary: List CRO features + tenant config (permission cro:read)
+      responses:
+        '200':
+          description: Features
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CROFeature' }
+  /cro/features/{featureId}:
+    parameters: [ { $ref: '#/components/parameters/FeatureId' } ]
+    patch:
+      tags: [cro]
+      summary: Enable/disable a CRO feature (permission cro:configure)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: { type: boolean }
+                priority: { type: integer }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeatureConfiguration' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /cro/features/{featureId}/config:
+    parameters: [ { $ref: '#/components/parameters/FeatureId' } ]
+    put:
+      tags: [cro]
+      summary: Set feature config (validated vs config_schema; permission cro:configure)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                config: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeatureConfiguration' }
+        '422':
+          description: Config fails feature JSON schema
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /segments:
+    get:
+      tags: [segments]
+      summary: List segments (permission segments:read)
+      responses:
+        '200':
+          description: Segments
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Segment' }
+    post:
+      tags: [segments]
+      summary: Create a segment (permission segments:write)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, rule]
+              properties:
+                name: { type: string }
+                rule: { $ref: '#/components/schemas/SegmentRule' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Segment' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /campaigns:
+    post:
+      tags: [campaigns]
+      summary: Create a campaign (permission campaigns:create)
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CampaignInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Campaign' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /campaigns/{campaignId}/send:
+    parameters: [ { $ref: '#/components/parameters/CampaignId' } ]
+    post:
+      tags: [campaigns]
+      summary: Send/schedule a campaign (permission campaigns:send)
+      description: Async fan-out to FCM/APNs; respects frequency caps & opt-out (BR-PUSH).
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      responses:
+        '202': { description: Send accepted (async) }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /notifications/{notificationId}/report:
+    parameters: [ { $ref: '#/components/parameters/NotificationId' } ]
+    get:
+      tags: [notifications]
+      summary: Delivery/open/conversion report (permission notifications:read)
+      responses:
+        '200':
+          description: Report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationReport' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /analytics/overview:
+    get:
+      tags: [analytics]
+      summary: Overview metrics (permission analytics:read)
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to,   in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Overview
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalyticsOverview' }
+  /attribution/revenue:
+    get:
+      tags: [attribution]
+      summary: App-attributed revenue share (MVP; permission attribution:read)
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to,   in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Attribution totals with methodology disclosure
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttributionRevenue' }
+  /attribution/funnel:
+    get:
+      tags: [attribution]
+      summary: "Full funnel attribution (FUTURE — Phase 2; permission attribution:read)"
+      responses:
+        '501': { description: Not implemented in V1.0 (Phase 2) }
+
+  /billing/subscription:
+    get:
+      tags: [billing]
+      summary: Current subscription (permission billing:read)
+      responses:
+        '200':
+          description: Subscription
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subscription' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /webhooks/{platform}:
+    parameters:
+      - name: platform
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/PlatformType' }
+    post:
+      tags: [webhooks]
+      summary: Inbound platform webhook (signature-authenticated)
+      description: >
+        Verifies signature, persists raw payload, deduplicates on
+        (platform, external_event_id), returns 2xx fast, processes async.
+        Payload shapes are platform-specific and TO VERIFY (SRS §37/§38).
+      security:
+        - webhookSignature: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '202': { description: Accepted (queued for async processing) }
+        '401': { description: Signature invalid }
+
+  /admin/merchants:
+    get:
+      tags: [admin]
+      summary: Merchant lookup (internal; global; audited)
+      security: [ { internalSSO: [] } ]
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Matches
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AdminMerchant' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /admin/webhooks/{webhookEventId}/replay:
+    parameters:
+      - name: webhookEventId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [admin]
+      summary: Replay a webhook event (internal admin; audited)
+      security: [ { internalSSO: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        '202': { description: Replay enqueued }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+components:
+  securitySchemes:
+    merchantJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    appInstanceToken:
+      type: apiKey
+      in: header
+      name: X-App-Token
+    appBootstrap:
+      type: apiKey
+      in: header
+      name: X-App-Bootstrap
+    webhookSignature:
+      type: apiKey
+      in: header
+      name: X-Webhook-Signature
+    internalSSO:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+      description: Opaque pagination cursor
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, default: 50, maximum: 200, minimum: 1 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string }
+    UserId:      { name: userId,      in: path, required: true, schema: { type: string, format: uuid } }
+    StoreId:     { name: storeId,     in: path, required: true, schema: { type: string, format: uuid } }
+    ProductId:   { name: productId,   in: path, required: true, schema: { type: string, format: uuid } }
+    FeatureId:   { name: featureId,   in: path, required: true, schema: { type: string, format: uuid } }
+    CampaignId:  { name: campaignId,  in: path, required: true, schema: { type: string, format: uuid } }
+    NotificationId: { name: notificationId, in: path, required: true, schema: { type: string, format: uuid } }
+
+  responses:
+    Unauthorized:
+      description: Authentication failed
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Forbidden:
+      description: Authorization failed (missing permission)
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    NotFound:
+      description: Not found (also returned for cross-tenant access, to avoid existence leaks)
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    ValidationError:
+      description: Validation failed
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  schemas:
+    PlatformType:
+      type: string
+      enum: [salla, zid, woocommerce, shopify]
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            correlation_id: { type: string, format: uuid }
+            retryable: { type: boolean }
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field: { type: string }
+                  issue: { type: string }
+    Page:
+      type: object
+      properties:
+        next_cursor: { type: string, nullable: true }
+        has_more: { type: boolean }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    LoginResponse:
+      type: object
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        tenant_id: { type: string, format: uuid }
+        user: { $ref: '#/components/schemas/MerchantUser' }
+    MerchantUser:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        role: { type: string, enum: [admin, staff] }
+        status: { type: string, enum: [active, disabled] }
+        permissions: { type: array, items: { type: string } }
+    Store:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        platform: { $ref: '#/components/schemas/PlatformType' }
+        external_store_id: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [connected, degraded, reauth_required, disconnected] }
+    StoreStatus:
+      allOf:
+        - $ref: '#/components/schemas/Store'
+        - type: object
+          properties:
+            connection_status: { type: string, enum: [active, degraded, reauth_required, disconnected] }
+            last_sync_at: { type: string, format: date-time, nullable: true }
+            platform_limitations:
+              type: array
+              description: Plain-language notices for features limited by this platform's API (FR-B04)
+              items: { type: string }
+    Product:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        platform: { $ref: '#/components/schemas/PlatformType' }
+        external_id: { type: string }
+        title: { type: string }
+        status: { type: string, enum: [active, archived] }
+        variants:
+          type: array
+          items: { $ref: '#/components/schemas/Variant' }
+    Variant:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        external_id: { type: string }
+        sku: { type: string, nullable: true }
+        price_cents: { type: integer, nullable: true }
+        currency: { type: string, nullable: true }
+        in_stock: { type: boolean }
+        quantity: { type: integer }
+    InstallationBootstrap:
+      type: object
+      properties:
+        installation_id: { type: string, format: uuid }
+        app_token: { type: string }
+        anonymous_shopper_id: { type: string, format: uuid }
+    Session:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        started_at: { type: string, format: date-time }
+    EventEnvelope:
+      type: object
+      required: [event_id, type, occurred_at]
+      properties:
+        event_id: { type: string, format: uuid }
+        type: { type: string }
+        version: { type: integer, default: 1 }
+        occurred_at: { type: string, format: date-time }
+        correlation_id: { type: string, format: uuid }
+        causation_id: { type: string, format: uuid, nullable: true }
+        session_id: { type: string, format: uuid, nullable: true }
+        properties: { type: object, additionalProperties: true }
+    MobileConfig:
+      type: object
+      properties:
+        branding:
+          type: object
+          properties:
+            logo_url: { type: string, nullable: true }
+            primary_color: { type: string, nullable: true }
+            secondary_color: { type: string, nullable: true }
+            splash_config: { type: object, additionalProperties: true }
+        enabled_features:
+          type: array
+          items: { type: string }
+    CRORenderConfig:
+      type: object
+      properties:
+        feature_code: { type: string }
+        priority: { type: integer }
+        config: { type: object, additionalProperties: true }
+    CROFeature:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [ga, beta, deprecated] }
+        config_schema: { type: object, additionalProperties: true }
+        configuration: { $ref: '#/components/schemas/FeatureConfiguration' }
+    FeatureConfiguration:
+      type: object
+      properties:
+        feature_id: { type: string, format: uuid }
+        enabled: { type: boolean }
+        priority: { type: integer }
+        config: { type: object, additionalProperties: true }
+    SegmentRule:
+      type: object
+      description: Behavioral rule DSL (full grammar in SRS §42, deferred pass D4)
+      properties:
+        op: { type: string, enum: [and, or, not] }
+        conditions:
+          type: array
+          items: { type: object, additionalProperties: true }
+    Segment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        rule: { $ref: '#/components/schemas/SegmentRule' }
+        last_evaluated_at: { type: string, format: date-time, nullable: true }
+    CampaignInput:
+      type: object
+      required: [name, template]
+      properties:
+        name: { type: string }
+        type: { type: string, enum: [broadcast, triggered], default: broadcast }
+        template:
+          type: object
+          properties:
+            title: { type: string }
+            body: { type: string }
+            deep_link: { type: string, nullable: true }
+            image_url: { type: string, nullable: true }
+        segment_ids:
+          type: array
+          items: { type: string, format: uuid }
+        schedule_at: { type: string, format: date-time, nullable: true }
+    Campaign:
+      allOf:
+        - $ref: '#/components/schemas/CampaignInput'
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            status: { type: string, enum: [draft, scheduled, sending, sent, cancelled] }
+    NotificationReport:
+      type: object
+      properties:
+        notification_id: { type: string, format: uuid }
+        delivered: { type: integer }
+        opened: { type: integer }
+        open_rate: { type: number }
+        conversions: { type: integer }
+    AnalyticsOverview:
+      type: object
+      properties:
+        installs: { type: integer }
+        active_users_daily: { type: integer }
+        active_users_weekly: { type: integer }
+        push_open_rate: { type: number }
+    AttributionRevenue:
+      type: object
+      properties:
+        window:
+          type: object
+          properties:
+            from: { type: string, format: date }
+            to: { type: string, format: date }
+        model: { type: string, enum: [last_non_direct] }
+        attribution_window_days: { type: integer }
+        methodology: { type: string, enum: [simplified_order_tagging] }
+        disclosure: { type: string }
+        totals:
+          type: object
+          properties:
+            store_net_cents: { type: integer }
+            app_attributed_net_cents: { type: integer }
+            app_attributed_share: { type: number }
+            unknown_share: { type: number }
+    Subscription:
+      type: object
+      properties:
+        plan_code: { type: string }
+        status: { type: string, enum: [trialing, active, past_due, canceled] }
+        current_period_end: { type: string, format: date-time, nullable: true }
+    AdminMerchant:
+      type: object
+      properties:
+        tenant_id: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string, enum: [active, suspended, deleted] }
+        platforms:
+          type: array
+          items: { $ref: '#/components/schemas/PlatformType' }
