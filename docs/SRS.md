@@ -17,7 +17,7 @@ scope: "V1.0"
 - **Status:** Final — Engineering Implementation Specification
 - **Date:** September 2026
 
-> **Status: COMPLETE.** This is the full Software Requirements Specification for Appliify V1.0. It contains the **technical core foundation** — the parts an engineering team needs to begin building: scope reconciliation against BRD/PRD v1.1, domain model, system architecture, the complete data layer (data dictionary → constraints → indexes → ERD → production DDL), the API architecture and core endpoints, the event architecture, and the revenue-attribution specification. plus the complete push/CRO/segmentation engines, analytics & LTV, jobs/queues/cache, mobile & dashboard specs, security/privacy/audit/observability, NFRs, testing, deployment & DR, commercial analytics, and final consistency/completeness audits with an implementation backlog. Companion files: [`database/schema.sql`](./database/schema.sql), [`api/openapi.yaml`](./api/openapi.yaml), [`architecture/integration-and-sync.md`](./architecture/integration-and-sync.md). Nothing here is filler.
+> **Status: COMPLETE.** This is the full Software Requirements Specification for Appliify V1.0. It contains the **technical core foundation** — the parts an engineering team needs to begin building: scope reconciliation against BRD/PRD v1.1, domain model, system architecture, the complete data layer (data dictionary → constraints → indexes → ERD → production DDL), the API architecture and core endpoints, the event architecture, and the revenue-attribution specification. plus the complete push/CRO/segmentation engines, analytics & LTV, jobs/queues/cache, mobile & dashboard specs, security/privacy/audit/observability, NFRs, testing, deployment & DR, commercial analytics, the design system & visual identity (§77), and final consistency/completeness audits with an implementation backlog. Companion files: [`database/schema.sql`](./database/schema.sql), [`api/openapi.yaml`](./api/openapi.yaml), [`architecture/integration-and-sync.md`](./architecture/integration-and-sync.md), [`design/design-system.md`](./design/design-system.md). Nothing here is filler.
 
 ---
 
@@ -99,6 +99,7 @@ scope: "V1.0"
 74. [Implementation Backlog](#74-implementation-backlog)
 75. [Estimation Support](#75-estimation-support)
 76. [Critical Architectural Rules — compliance](#76-critical-architectural-rules--compliance)
+77. [Design System & Visual Identity (UI/UX Specification)](#77-design-system--visual-identity-uiux-specification)
 
 ---
 
@@ -1866,7 +1867,7 @@ Each ADR: ID · Title · Status · Context · Decision · Alternatives · Conseq
 
 ## 34. Document Map & Companion Files
 
-This SRS is complete. The specification continues below (§35–§76) with the full engine, mobile, security, operations, and audit sections. Companion committable files:
+This SRS is complete. The specification continues below (§35–§77) with the full engine, mobile, security, operations, design, and audit sections. Companion committable files:
 
 | File | Contents |
 |---|---|
@@ -1875,6 +1876,7 @@ This SRS is complete. The specification continues below (§35–§76) with the f
 | [`architecture/integration-and-sync.md`](./architecture/integration-and-sync.md) | Connector reference (Salla), webhook pipeline, sync engine, reconciliation, outage handling — with all platform specifics marked `TO VERIFY`. |
 | [`testing/test-catalog.md`](./testing/test-catalog.md) | Test case catalog (headline cases in §61). |
 | [`architecture/adr/`](./architecture/adr/) | ADR index (full ADRs in §31). |
+| [`design/design-system.md`](./design/design-system.md) | Design tokens, component rules, and screen-level wireframe intent for every §47.1/§49 screen (§77). |
 
 **Consistency guarantee (RULE P):** any change to a table, event, endpoint, or rule must update the Data Dictionary (§20), ERD (§24), DDL (`schema.sql`), API (§29 / `openapi.yaml`), and traceability (§6) together. See the consistency and completeness audits in §72–§73.
 
@@ -2913,4 +2915,21 @@ No invented developer-hours. Instead, the factors an estimator needs:
 
 ---
 
-*This Software Requirements Specification is complete for Appliify V1.0 and, together with its companion files (`database/schema.sql`, `api/openapi.yaml`, `architecture/integration-and-sync.md`), serves as the single technical source of truth. External-platform specifics remain `TO VERIFY` per §33 and must be confirmed against live documentation before the affected connectors are certified for production.*
+## 77. Design System & Visual Identity (UI/UX Specification)
+
+Full specification — token architecture, native-shell interaction rules, the full component library, and screen-level wireframe intent for every screen named in §47.1 and §49 — lives in the companion file [`design/design-system.md`](./design/design-system.md). No new screens or functional requirements are introduced there; it specifies how the already-approved screen list should look, feel, and behave.
+
+**Deliberately not specified here or in the companion file:** actual color values and typefaces. Appliify's own dashboard brand and the per-merchant white-label mobile branding are defined separately; this specification is a token architecture (named slots + usage rules) that either can plug into without rework.
+
+**Core mechanic this specification is built around (§1 of the companion file):** each merchant receives their own independently-branded, independently-compiled app (own package identity, own branding baked in at build time) within a 42–48 hour build/signing turnaround, then published under the merchant's own developer identity — a per-merchant build model, resolving §33 open question OQ-01 in favor of per-merchant builds rather than a shared app shell. The product requirement driving every interaction rule in the companion file's §5 is that this WebView-based app must never read as a WebView to the shopper.
+
+**Three rules carried over from the business/product documents into the visual layer (non-negotiable):**
+- The attribution figure (FR-E00/BR-040) must always be the visually largest number on any screen that shows it, and its methodology disclosure must be rendered with real visual weight — never demoted to fine print (§30, PRD §4.2).
+- Every screen defines loading/empty/error/success states visually, not just behaviorally (§47.2, §49 already require this functionally; the companion file makes it a visual requirement too).
+- Whatever color values are eventually assigned to the token set, every text/background and text-on-accent pairing must pass an automated WCAG AA contrast check before going live — enforced at the Branding & Appearance screen for merchant-chosen colors specifically.
+
+**Known open items (see companion file §11):** no color/typeface values exist yet (by design, pending brand identity work); the 42–48h build SLA needs to be clearly distinguished from app-store review time in merchant-facing copy; no production visual asset library exists yet; light-mode support for the mobile app is an open product decision.
+
+---
+
+*This Software Requirements Specification is complete for Appliify V1.0 and, together with its companion files (`database/schema.sql`, `api/openapi.yaml`, `architecture/integration-and-sync.md`, `design/design-system.md`), serves as the single technical source of truth. External-platform specifics remain `TO VERIFY` per §33 and must be confirmed against live documentation before the affected connectors are certified for production.*
