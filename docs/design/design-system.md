@@ -17,6 +17,14 @@ Everything below assumes the same underlying mechanic, stated plainly so no scre
 - Every merchant gets **their own compiled app** (their own package/bundle identity, their own branding baked in at build time), delivered as an installable Android package within a 42–48 hour turnaround from onboarding, then published under the merchant's own developer/publisher identity. This is a **per-merchant build model**, not one shared app shell serving all merchants (this resolves SRS §33 open question OQ-01 in favor of per-merchant builds).
 - The product requirement driving this entire document: **the result must feel like a genuinely native mobile app to the shopper — never like a browser or a wrapped website.** Every section below exists to make that true in a concrete, buildable way, not as a slogan.
 
+### 1.1 Build phasing: WebView-first, Native-later (confirmed decision)
+
+Two build phases apply to the browsing/shopping screens specifically (Home, Category/Search, Product Detail, Cart, Checkout). This is a confirmed product decision, not an open question:
+
+- **Phase 1 (current):** these five screens render the merchant's **actual live website content** inside the WebView, largely as-is — their internal page layout is the merchant's own site design (whatever theme/template that merchant already runs on Salla/Shopify/Zid/WooCommerce), not a layout this design system dictates. This is what makes the 42–48 hour per-merchant build turnaround possible: there is no custom page-by-page design work required per merchant for these five screens, because their content already exists on the merchant's live site.
+- **Phase 2 (future):** these same five screens are rebuilt as fully native screens, populated via the platform connector's catalog/order APIs (FR-A01) instead of loading the live site, at which point the full native wireframe specs (§7.2–§7.6 below) become the actual build target rather than a forward-looking reference.
+- **What this changes for §7.2–§7.6 below:** those subsections describe the **eventual native target for Phase 2** and, in Phase 1, the **native overlay layer only** (chrome, CRO overlays, bottom nav) that sits on top of whatever the merchant's live site renders underneath. A Phase-1 UI/UX designer does not design the internal page layout of Home/Category/Product Detail/Cart/Checkout from scratch — that content is the merchant's own website. What the designer *does* need to design now is covered in §7.0 immediately below.
+
 ---
 
 ## 2. Design Philosophy
@@ -269,12 +277,25 @@ Each step is a distinct, visible state in the dashboard (reusing the state patte
 
 Maps 1:1 to the screen list in SRS §47.1. Every element below references tokens (§3) only.
 
+### 7.0 What Phase 1 (WebView-first) actually requires the designer to build
+
+Given §1.1, the Figma workload for the mobile app splits into three buckets — this is the practical scope list to work from:
+
+**Bucket 1 — Fully native screens (design these as complete, standalone screens, same as any native app):**
+Splash (§7.1), Sign In / Register (§7.12), Wishlist (§7.8), Notification Inbox (§7.9), Notification Detail (§7.10), Account / Profile (§7.11). None of these depend on the merchant's live website content — they are Appliify-built regardless of phase.
+
+**Bucket 2 — Native overlay components only (design as floating/injectable components, not full pages):**
+The CRO overlay set from §7.4 — countdown pill, stock-scarcity indicator, social-proof card — plus the persistent bottom navigation bar (§4.4) and the status-bar/splash-handoff treatment (§5). These must be designed to sit convincingly on top of *any* merchant website regardless of that site's own layout, spacing, or color scheme — treat them as components with their own background/shadow-free container (per §4.4 elevation rule) rather than assuming they'll align to a grid the underlying page defines, since that page varies per merchant.
+
+**Bucket 3 — Not designed in Figma at all in Phase 1:**
+The internal page layout of Home, Category/Search, Product Detail, Cart, and Checkout (§7.2–§7.6) is the merchant's own live website — there is nothing to design here per merchant. These subsections remain in this document as the **Phase 2 native target**, so the eventual native rebuild has a spec to build against, but they are not part of the current Figma scope.
+
 ### 7.1 Splash
 - **Layout:** full-bleed `bg/base`, centered lockup, no navigation chrome.
 - **Elements:** merchant's logo/wordmark in `text/primary`; a slim progress indicator in `accent/primary`.
 - **Behavior:** background must exactly match the value used immediately after in the Home screen's `bg/base`, per §5.
 
-### 7.2 Home (storefront)
+### 7.2 Home (storefront) — Phase 2 native target, not current Figma scope (§7.0)
 - **Layout (top → bottom):** sticky header → hero promotional card → horizontal category chip row → product grid → bottom navigation.
 - **Header:** merchant logo/wordmark left; search icon and cart icon (`icon/size/m`) right, cart icon shows an `accent/primary` badge with item count when non-empty.
 - **Hero card:** interactive card (§4.3), may contain a promotional message.
@@ -282,12 +303,12 @@ Maps 1:1 to the screen list in SRS §47.1. Every element below references tokens
 - **Product grid:** each card shows product image, name (`type/body-m`, `text/primary`), price (`type/body-m`, `accent/primary`), and an optional stock-scarcity tag (`accent/secondary-muted` badge) when applicable.
 - **Bottom nav:** Home / Search / Wishlist / Cart / Account, per §4.4.
 
-### 7.3 Category / Search
+### 7.3 Category / Search — Phase 2 native target, not current Figma scope (§7.0)
 - **Layout:** sticky header with the search field expanded and focused → filter chip row → product grid (identical card component to Home) → bottom nav.
 - **Filter chips:** tapping opens the Filters bottom sheet (§4.5) with a price-range slider, category checkboxes, and an availability toggle.
 - **Empty result state:** standard Empty pattern (§4.7), action "Clear filters."
 
-### 7.4 Product Detail
+### 7.4 Product Detail — page layout is Phase 2 native target; the CRO overlay zone is current Phase-1 scope (§7.0, Bucket 2)
 - **Layout:** full-width product image → floating back/wishlist icons over the image → title/price/rating block → **mandatory CRO overlay zone** → expandable description accordion → sticky add-to-cart bar.
 - **CRO overlay zone (non-negotiable, positioned directly under price, rendered as a native overlay per §5):**
   - Countdown timer: a pill showing remaining time, shown only while an active countdown exists for this product.
@@ -296,13 +317,13 @@ Maps 1:1 to the screen list in SRS §47.1. Every element below references tokens
   - These three elements are the product's core competitive differentiator (BRD §2.3) and must never be omitted, generalized into a single generic badge, or visually deprioritized relative to the rest of the screen.
 - **Sticky bottom bar:** quantity stepper + full-width Primary "Add to Cart" button.
 
-### 7.5 Cart
+### 7.5 Cart — Phase 2 native target, not current Figma scope (§7.0)
 - **Layout:** vertical list of line-item cards → order summary block → sticky checkout bar.
 - **Line item:** thumbnail, name, selected variant (`text/secondary`), quantity stepper, price (`accent/primary`), icon-button remove action.
 - **Order summary:** subtotal → discount line (`accent/secondary` if a coupon applies) → divider (`border/neutral`) → total in `type/display-s`.
 - **Empty state:** standard pattern (§4.7), action "Start Shopping."
 
-### 7.6 Checkout
+### 7.6 Checkout — Phase 2 native target, not current Figma scope (§7.0)
 - **Layout:** 3-step progress indicator (Shipping → Payment → Review, §4.6) → form (§4.2) → collapsed order-summary accordion → sticky continue bar.
 - **Note:** this screen wraps the store's native checkout flow (PRD §11); the shell still renders the step indicator natively so the shopper never loses orientation mid-flow, and never sees raw store-site checkout chrome unstyled by the shell.
 
@@ -441,6 +462,7 @@ Accessibility is a design requirement with the same weight as the functional NFR
 
 | Item | Status |
 |---|---|
+| Merchant site's own header/nav vs. Appliify's native bottom nav, in Phase 1 | Confirmed: Phase 1 loads the merchant's live site largely as-is (§1.1), which means that site's own header/navigation renders inside the WebView underneath Appliify's native bottom nav. This is a visible double-navigation risk that still needs a concrete answer — likely candidates are (a) a lightweight CSS injection that hides just the merchant site's own header/nav chrome while leaving page content untouched, or (b) accepting the overlap for Phase 1 as a known limitation resolved fully at the Phase 2 native rebuild. Needs a decision before Phase 1 build, not just before Phase 2. |
 | No color values or typefaces are defined anywhere in this document | Intentional — awaiting Appliify's own brand identity (dashboard) and the merchant-facing branding system's default/allowed value ranges (mobile app). This document is complete as a system; it is not complete as a rendered product until those values exist. |
 | Apple App Store review timeline vs. the 42–48h build SLA (§6.2) | Needs explicit product/marketing communication so merchants don't read "42–48 hours" as "your app will be live on the App Store" — the build-status stepper in §6.2 is the mitigation, but the marketing copy around the SLA should be reviewed too |
 | No production visual asset library (Figma or equivalent) exists yet | Must be produced and linked here once real brand values are supplied |
